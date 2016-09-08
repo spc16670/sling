@@ -1,0 +1,2 @@
+# sling
+Email sending application
