@@ -1,3 +1,4 @@
+APP_NAME = sling
 REBAR = ./rebar
 
 .PHONY: all compile test clean get-deps build-plt dialyze
@@ -8,7 +9,7 @@ compile:
 	$(REBAR) compile
 
 test: 
-	export ERL_FLAGS="-config sling.config"; $(REBAR) skip_deps=true eunit
+	export ERL_FLAGS="-config $(APP_NAME).config"; $(REBAR) skip_deps=true eunit
 
 clean:
 	@$(REBAR) clean

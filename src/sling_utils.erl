@@ -11,12 +11,37 @@
 
 %% API
 -export([
-    get_env/1
+	ensure_string/1
+	,ensure_binary/1
+	,ensure_ip_string/1	
+	,ensure_ip_tuple/1
 ]).
 
+ensure_string(Val) when is_binary(Val) ->
+	binary_to_list(Val);
+ensure_string(Val) when is_atom(Val) ->
+	atom_to_list(Val);
+ensure_string(Val) when is_list(Val) ->
+	Val.
 
-get_env(Key) ->
-    case application:get_env(sling, Key) of
-        {ok,Val} -> Val;
-        _ -> undefined
-    end.
+ensure_binary(Val) when is_list(Val) ->
+	list_to_binary(Val);
+ensure_binary(Val) when is_binary(Val) ->
+	Val.
+
+ensure_ip_string(IP) when is_tuple(IP) ->
+	inet_parse:ntoa(IP);	
+ensure_ip_string(IP) when is_list(IP) ->
+	IP.
+
+ensure_ip_tuple(IP) when is_tuple(IP) ->
+	IP;	
+ensure_ip_tuple(IP) when is_list(IP) ->
+	case inet_parse:address(IP) of
+		{ok, Tuple} -> 
+			Tuple;
+		Error -> 
+			Error
+	end.
+
+
