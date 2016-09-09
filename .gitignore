@@ -2,3 +2,4 @@ sling.iml
 .idea
 ebin
 deps
+priv/ssl/*
