@@ -1,0 +1,12 @@
+{application, sling,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { sling_app, []}},
+  {env, []}
+ ]}.

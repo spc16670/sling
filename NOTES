@@ -1,0 +1,92 @@
+List of DNS entries that are relevant to email delivery:
+
+PTR:
+    ===========================================================================
+    Email relays may do a PTR lookup on the sending IP address to verify if the
+    lookup returns the same domain for the IP address as the one in the email
+    message. PTR record can be configured with the hosting provider.
+
+    For example, to do a reverse lookup of the IP address 8.8.4.4 the PTR
+    record for the domain name 4.4.8.8.in-addr.arpa would be looked up, and
+    found to point to google-public-dns-b.google.com. If the A record for
+    google-public-dns-b.google.com in turn pointed back to 8.8.4.4 then it
+    would be said to be forward-confirmed.
+
+    forward-confirmed test for an email address asdf@asdf.com:
+
+        1) MX lookup on asdf.com returns IP address of 1.2.3.4
+            dig -t MX asdf.com
+            mail.asdf.com           10      IN  A   1.2.3.4
+
+        2) PTR lookup for 1.2.3.4 returns hostname of db12.asdf.com
+            4.3.2.1.in-addr.arpa.   3222    IN  PTR db12.asdf.com
+
+        3) A record lookup confirms the IP address returned from MX lookup
+            dig -t A db12.asdf.com
+            db12.asdf.com           183     IN  A   1.2.3.4
+
+    Lookup command:
+        dig [+noall] [+answer] -x aa.bb.cc.dd
+
+TXT:
+    ===========================================================================
+    SPF (RFC4408[2006] and RFC7208[2014])
+        An SPF record is a type of Domain Name Service (DNS) record that
+        identifies which mail servers are permitted to send email on
+        behalf of your domain.
+
+        Value Format:
+            v=spf1 include:spf.protection.outlook.com -all
+
+            v: version
+            include: The "include" mechanism triggers a recursive evaluation of
+                check_host().
+            all: Mechanisms after "all" will never be tested.
+
+        Lookup command:
+            SPF lookup is a regular TXT lookup:
+                dig -t txt [domain] [+short]
+
+    ===========================================================================
+    DKIM (RFC6376 [2007] and RFC4871 [2011]):
+        DKIM allows for email signing using public key.
+        DKIM entries are stored in TXT records.
+        https://tools.ietf.org/html/rfc4871
+
+        TXT record is a DNS lookup Key that return a Value. The Value for DKIM
+        follows Key-Value pattern too.
+
+        Key Format:
+            [custom_string]._domainkey.[domain]
+
+            e.g.
+            somestring._domainkey.myexampledomain.com
+
+        Value Format:
+            v=DKIM1; g=*; k=rsa; p=MIGfMA0GCSqGSIb3DQEBA......
+
+            v: Version (plain-text; REQUIRED)
+            g: (DEPRECATED)
+                Granularity of the key (plain-text; OPTIONAL, default is "*").
+                "g=" does not mean "g=*", even though "g=*" is the default for
+                that tag.
+            k: Key type (plain-text; OPTIONAL, default is "rsa").
+            p: Public-key data (base64; REQUIRED).
+
+        Lookup command:
+            For DKIM lookup
+                dig -t txt [custom_string]._domainkey.[domain] [+short]
+
+    ===========================================================================
+    DMARC (7489 [2015])
+        Allows you to specify how mail servers should handle messages from
+        your domain that do not have valid SPF and DKIM records setup.
+
+        v=DMARC1; p=none; rua=mailto:mailauth-reports@google.com
+
+        Lookup command:
+            For DMARC lookup
+                dig -t txt _dmarc.[domain] [+short]
+
+
+
