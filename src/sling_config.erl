@@ -63,8 +63,8 @@ get_env(Key, Default) ->
 %%
 
 set_env(Key, Val) when Key =:= dkim_private_key ->
-	PrivKey = sling_crypto:read_key_file(pem, Val),
-	application:set_env(?APP_NAME, Key, PrivKey);
+	Data = sling_crypto:read_key_file(pem, Val),
+	application:set_env(?APP_NAME, Key, Data);
 set_env(Key, Val) when Key =:= dkim_public_key ->
 	PubKey = sling_crypto:read_key_file(pem, Val),	
 	application:set_env(?APP_NAME, Key, PubKey);

@@ -30,8 +30,12 @@ verify_dkim(Msg, Signature, PublicKey) when is_binary(Msg), is_binary(Signature)
 	public_key:verify(Msg, sha256, Signature, PublicKey).
 		
 
+%%
+%% @doc 
+%%
 sign_dkim(Msg) when is_binary(Msg) ->
-	PrivKey = sling_config:get_dkim_private_key(),
+	PrivData = sling_config:get_dkim_private_key(),
+	PrivKey = sling_crypto:key_to_entry(pem, PrivData),
 	public_key:sign(Msg, sha256, PrivKey).
 
 
@@ -41,7 +45,7 @@ sign_dkim(Msg) when is_binary(Msg) ->
 read_key_file(Type, Path) when Type =:= pem, is_binary(Path) ->
 	PathStr = sling_utils:ensure_string(Path),
 	{ok, PemData} = file:read_file(PathStr),
-	key_to_entry(Type, PemData).
+	PemData.
 
 %%
 %% @doc

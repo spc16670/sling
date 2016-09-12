@@ -11,9 +11,52 @@
 
 %% API
 -export([
-	is_valid_email/1
+	dkim_email/4
+	,is_valid_email/1
 	,is_valid_domain/1	
 ]).
+
+%%
+%% @doc
+%%
+
+dkim_email(Subject, Body, ToName, ToEmail) ->
+	ToStr = binary_to_list(ToEmail),
+	case is_valid_email(ToStr) of
+		{true,FQDM} ->
+			PrivKey = sling_config:get_dkim_private_key(),			
+			DkimTxtDnsSelector = sling_config:get_dkim_selector(),
+			NoReplyUser = sling_config:get_env(email_no_reply_user),
+			NoReplyUsername = proplists:get_value(username, NoReplyUser),
+			NoReplyName = proplists:get_value(name, NoReplyUser),
+			ServerDomain = sling_config:get_server_domain(),
+			DKIMOptions = [
+				{s,DkimTxtDnsSelector}
+				,{d, ServerDomain}
+				,{private_key, {pem_plain, PrivKey}}
+			],
+			NoReplyFromEmail = iolist_to_binary([ NoReplyUsername,<<"@">>,ServerDomain ]),
+			NoReplyFrom = iolist_to_binary([
+				NoReplyName, <<" <">>, NoReplyFromEmail, <<">">>
+			]),
+			FullToName = iolist_to_binary([
+				ToName, <<" <">>, ToEmail, <<">">>
+			]),
+
+			SignedMailBody = mimemail:encode({ <<"text">>, <<"html">>,[
+				{<<"Subject">>, Subject}
+				,{<<"From">>, NoReplyFrom}
+				,{<<"To">>, FullToName }
+			], [], Body },[{dkim, DKIMOptions}]),
+
+			FromStr = binary_to_list(NoReplyFromEmail),
+			{ok, { FromStr, ToStr, SignedMailBody, FQDM } };
+ 		{false, _FQDM} ->
+			Msg = <<"Could not determine relay domain">>,
+			sling_log:info("~p ~p ~p ~n",[Msg,ToName,ToEmail]),
+		{ error, <<"Could not validate determine the relay domain">> }
+	end.
+
 
 %%
 %% @doc
@@ -28,15 +71,15 @@ is_valid_email(Addr) when is_list(Addr) ->
 	is_valid_email(Match, Addr).
 
 is_valid_email(nomatch, _) ->
-	{false,""};
+	{false, ""};
 is_valid_email({match,Ranges}, Addr) when length(Ranges) =:= 2 ->
 	{Start, End} = lists:nth(2, Ranges),
 	is_valid_email(Start, End, Addr).
 
 is_valid_email(0, End, Addr) when End > 0 ->
-	domain_is_valid(string:sub_string(Addr, End + 2));
+	is_valid_domain(string:sub_string(Addr, End + 2));
 is_valid_email(_, _, _) ->
-	{false,""}.
+	{false, ""}.
 
 %%
 %% @doc
