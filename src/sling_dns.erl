@@ -22,6 +22,7 @@
 	,ptr_lookup/1
 	,spf_lookup/1
 	,dkim_lookup/2
+	,dmarc_lookup/1
 
 	%% Tests
 	,forward_confirmed/0
@@ -30,6 +31,10 @@
 	,spf_exists/1
 	,dkim_configured/0
 	,dkim_configured/2
+	,dmarc_exists/0
+	,dmarc_exists/1
+
+	,dns_config_validated/0
 ]).
 
 %% ----------------------------------------------------------------------------
@@ -53,6 +58,41 @@ init() ->
 		_ ->
 			ok
 	end.
+
+%% ----------------------------------------------------------------------------
+
+%%
+%% @doc 
+%%
+-spec dns_config_validated() -> true | false.
+
+dns_config_validated() ->
+	ok = sling_dns:init(),
+	maybe_forward_confirmed(forward_confirmed()).
+	
+maybe_forward_confirmed(true) ->
+	maybe_spf_exists(spf_exists());
+maybe_forward_confirmed(false) ->
+	false.
+
+maybe_spf_exists(true) ->
+	maybe_dkim_configured(dkim_configured());
+maybe_spf_exists(false) ->
+	false.
+
+maybe_dkim_configured(true) ->
+	maybe_dmarc_exists(dmarc_exists());
+maybe_dkim_configured(false) ->
+	false.
+
+maybe_dmarc_exists(true) ->
+	sling_log:info("~nDNS configuration check successful.~n",[]),
+	true;
+maybe_dmarc_exists(false) ->
+	sling_log:info("~nDNS configuration check failed.~n",[]),
+	false.
+
+%% ----------------------------------------------------------------------------
 
 %%
 %% @doc
@@ -138,13 +178,12 @@ spf_lookup(Hostname) ->
 %%
 %% @doc
 %%
--spec dkim_lookup(string() | binary(), string() | binary()) 
+-spec dkim_lookup(string(), string() | binary()) 
 	-> { ok, Any } | { error, Any }.
 
-dkim_lookup(Domain, Selector) ->
-	DomainStr = sling_utils:ensure_string(Domain),
+dkim_lookup(Domain, Selector) when is_list(Domain) ->
 	SelectorStr = sling_utils:ensure_string(Selector),
-	FullSelector = SelectorStr ++ "._domainkey." ++ DomainStr,
+	FullSelector = SelectorStr ++ "._domainkey." ++ Domain,
 	case inet_res:nslookup(FullSelector, in, txt) of
 		{ok, Record} ->
 			case Record#'dns_rec'.'anlist' of
@@ -154,6 +193,27 @@ dkim_lookup(Domain, Selector) ->
 					[FirstAnswer | _] = DnsRecs,
 					DKIM = FirstAnswer#'dns_rr'.'data',
 					{ok, DKIM}	
+			end;
+		Error ->
+			Error
+	end.
+
+%%
+%% @doc
+%%
+-spec dmarc_lookup(string()) -> { ok, Any } | { error, Any }.
+
+dmarc_lookup(Domain) when is_list(Domain) ->
+	FullSelector = "_dmarc." ++ Domain,
+	case inet_res:nslookup(FullSelector, in, txt) of
+		{ok, Record} ->
+			case Record#'dns_rec'.'anlist' of
+				[] ->
+					{ error, <<"Empty DMARC answer">> };
+				DnsRecs ->
+					[FirstAnswer | _] = DnsRecs,
+					DMARC = FirstAnswer#'dns_rr'.'data',
+					{ok, DMARC}	
 			end;
 		Error ->
 			Error
@@ -199,16 +259,16 @@ forward_confirmed() ->
 
 forward_confirmed(ServerDomain) ->
 	if ServerDomain =:= undefined ->
-		{ error, <<"Server domain undefined">> };
+		Result = { error, <<"Server domain undefined">> },
+		maybe_successful(Result);
 	true ->
 		DomainStr = sling_utils:ensure_string(ServerDomain),
 		case mx_lookup(DomainStr) of
 			{ok, Sorted} ->
 				[FirstRecord | _ ] = Sorted,
 				forward_confirmed(DomainStr, FirstRecord);
-			{error, Error} ->
-				sling_log:info("~p~n",[Error]),
-				false
+			Error ->
+				maybe_successful(Error)
 		end
 	end.
 
@@ -216,7 +276,7 @@ forward_confirmed(ServerDomain, DnsEntry) ->
 	sling_log:info("Running forward confirmed test for ~p~n",[ServerDomain]),
 	{_Priority, AnswerDomain} = DnsEntry,
 	sling_log:info("DNS MX lookup domain ~p~n",[AnswerDomain]),
-	case a_lookup(AnswerDomain) of
+	Result = case a_lookup(AnswerDomain) of
 		{ok, IP} ->
 			IPStr = sling_utils:ensure_ip_string(IP),
 			sling_log:info("~p maps to ~p~n",[AnswerDomain, IPStr]),
@@ -224,35 +284,27 @@ forward_confirmed(ServerDomain, DnsEntry) ->
 				{ok, PtrDomain} ->
 					sling_log:info("PTR lookup returned ~p~n",[PtrDomain]),
 					if AnswerDomain =:= PtrDomain ->
-						sling_log:info("Forward Confirmed test successful~n",[]),
-						true;
+						{ok, <<"Forward Confirmed test successful">> };
 					true ->
 						sling_log:info("Testing if the IP ~p of MX ~p domain "
 							"matches the IP address pointed by sub-domain of "
 							"~p~n" ,[IPStr, AnswerDomain, PtrDomain]),
-						case match_domain_ip_to_a_lookup(PtrDomain, IP) of
-							{ok, MatchedIP} ->
-								MatchedIPStr = sling_utils:ensure_ip_string(MatchedIP),
-								sling_log:info("IP ~p pointed by MX ~p matches the IP "
-								"pointed by PTR ~p~n", [MatchedIPStr, AnswerDomain, PtrDomain]),
-								sling_log:info("Forward Confirmed test successful~n",[]),
-								true;
-							Error ->
-								sling_log:info("Forward Confirmed test failed ~p ~n",[Error]),
-								false
-						end
+						match_domain_ip_to_a_lookup(PtrDomain, IP)
 					end;
 				Error ->
 					Error
 			end;
 		Error -> 
 			Error 
-	end.	
+	end,
+	maybe_successful(Result).
 		
 
 %%
 %% @private Used by the @see forward_confirmed/2 for deep verification check.
 %%
+-spec match_domain_ip_to_a_lookup(string(), tuple()) 
+	-> {ok, Any} | {error, Any}.
 
 match_domain_ip_to_a_lookup(Domain, IP) ->
 	case inet_res:lookup(Domain, in, a, [{recurse, true}]) of
@@ -272,10 +324,10 @@ match_domain_ip_to_a_lookup(Domain, IP) ->
 				{ error, <<"No IP match">>};
 			true ->
 				[ MatchedIP | _ ] = Matched, 
-				{ ok , MatchedIP }
+				{ok, MatchedIP}
 			end;
 		Error ->
-			{ error, Error }
+			Error
 	end.
 
 
@@ -291,14 +343,7 @@ spf_exists() ->
 
 spf_exists(Domain) ->
 	DomainStr = sling_utils:ensure_string(Domain),
-	case spf_lookup(DomainStr) of 
-		{ok, Records} ->
-			sling_log:info("SPF lookup successful: ~p~n",[Records]),
-			true;
-		{error, Reason} ->
-			sling_log:info("SPF lookup failed: ~p~n",[Reason]),
-			false
-	end.
+	maybe_successful(spf_lookup(DomainStr)).
 		
 %% ----------------------------------------------------------------------------
 
@@ -316,30 +361,19 @@ dkim_configured(Domain, Selector) ->
 	SelectorStr = sling_utils:ensure_string(Selector),
 	sling_log:info("Running DKIM configuration test for ~p using ~p selector~n"
 		,[DomainStr, SelectorStr]),
-	case dkim_lookup(DomainStr, SelectorStr) of
+	Result = case dkim_lookup(DomainStr, SelectorStr) of
 		{ok, [Dkim]} ->
 			DkimConfig = split_dkim(Dkim),
 			K = proplists:get_value("k", DkimConfig),
 			P = proplists:get_value("p", DkimConfig),
 			sling_log:info("DNS records configured with ~p key: ~p~n",[K, P]),
-			case reconcile_public_key(K, P) of
-				{ok, Result} ->
-					case Result of
-						true -> 
-							sling_log:info("DKIM test successful ~n",[]);
-						false ->
-							sling_log:info("DKIM test failed ~n",[])
-					end,	
-					Result;
-				{error, Reason} ->
-					sling_log:info("DKIM test failed ~p~n",[Reason]),
-					false
-			end;
+			reconcile_public_key(K, P);
 		{ok, MultiValue} ->
 			{error, {multivalue, MultiValue}};
 		Error ->
 			Error
-	end.
+	end,
+	maybe_successful(Result).
 
 %%
 %% @private
@@ -370,9 +404,40 @@ reconcile_public_key(Type, PublicKey) when Type =:= "rsa" ->
 	Msg = <<"asdf">>,
 	Sig = sling_crypto:sign_dkim(Msg),
 	Verified = sling_crypto:verify_dkim(Msg, Sig, Pub),
-	{ok, Verified};
+	{ok, { <<"DKIM key reconciliation result">>, Verified } };
 reconcile_public_key(Type, _PublicKey) ->
-	{error, {unmatched, Type }}.
+	{error, { unmatched, Type }}.
 
+
+%% ----------------------------------------------------------------------------
+
+%%
+%% @doc
+%%
+-spec dmarc_exists() -> true | false.
+
+dmarc_exists() ->
+	ServerDomain = sling_config:get_server_domain(),
+	dmarc_exists(ServerDomain).
+
+-spec dmarc_exists(string() | binary()) -> true | false.
+
+dmarc_exists(Domain) ->
+	DomainStr = sling_utils:ensure_string(Domain),
+	maybe_successful(dmarc_lookup(DomainStr)). 
+	
+
+%% ----------------------------------------------------------------------------
+
+%%
+%% @private
+%%
+maybe_successful({ok, Result}) ->
+	sling_log:info("Test succeded ~p ~n",[Result]),
+	true;
+maybe_successful({error, Error}) ->
+	sling_log:info("Test failed ~p ~n",[Error]),
+	false.
+	
 
 

@@ -105,6 +105,7 @@ TXT:
         your domain that do not have valid SPF and DKIM records setup.
 
         v=DMARC1; p=none; rua=mailto:mailauth-reports@google.com
+		v=DMARC1; p=reject; sp=none; rf=afrf; pct=100; ri=86400
 
         Lookup command:
             For DMARC lookup
