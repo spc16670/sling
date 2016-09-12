@@ -15,11 +15,15 @@
 %% API
 -export([
 	init/0
+
+	%% Lookup helpers
 	,mx_lookup/1
 	,a_lookup/1
 	,ptr_lookup/1
 	,spf_lookup/1
 	,dkim_lookup/2
+
+	%% Tests
 	,forward_confirmed/0
 	,forward_confirmed/1
 	,spf_exists/0
@@ -29,8 +33,12 @@
 ]).
 
 %% ----------------------------------------------------------------------------
-%% init
+
 %%
+%% @doc
+%%
+-spec init() -> ok.
+
 init() ->
 	case whereis(inet_db) of
 		P when is_pid(P) ->
@@ -47,8 +55,10 @@ init() ->
 	end.
 
 %%
+%% @doc
 %%
-%%
+-spec mx_lookup(string()) -> { ok, Any } | { error, Any }.
+
 mx_lookup(ServerDomain) ->
 	case inet_res:nslookup(ServerDomain, in, mx) of
 		{ok, Record} ->
@@ -70,8 +80,10 @@ mx_lookup(ServerDomain) ->
 	end.
 
 %%
+%% @doc
 %%
-%%
+-spec a_lookup(string()) -> { ok, Any } | { error, Any }.
+
 a_lookup(Hostname) ->
 	case inet_res:nslookup(Hostname, in, a) of
 		{ok, Record} ->
@@ -88,8 +100,10 @@ a_lookup(Hostname) ->
 	end.
 
 %%
+%% @doc
 %%
-%%
+-spec spf_lookup(string()) -> { ok, Any } | { error, Any }.
+
 spf_lookup(Hostname) ->
 	case inet_res:nslookup(Hostname, in, txt) of
 		{ok, Record} ->
@@ -122,8 +136,11 @@ spf_lookup(Hostname) ->
 	end.
 
 %%
+%% @doc
 %%
-%%
+-spec dkim_lookup(string() | binary(), string() | binary()) 
+	-> { ok, Any } | { error, Any }.
+
 dkim_lookup(Domain, Selector) ->
 	DomainStr = sling_utils:ensure_string(Domain),
 	SelectorStr = sling_utils:ensure_string(Selector),
@@ -144,8 +161,10 @@ dkim_lookup(Domain, Selector) ->
 
 
 %%
+%% @doc
 %%
-%%
+-spec ptr_lookup(tuple() | string()) -> { ok, Any } | { error, Any }. 
+
 ptr_lookup(IP) ->
 	IPStr = sling_utils:ensure_ip_string(IP),
 	case inet_res:nslookup(IPStr, in, ptr) of
@@ -163,6 +182,8 @@ ptr_lookup(IP) ->
 	end.
 
 %% ----------------------------------------------------------------------------
+
+%%
 %% @doc Runs forward confirmed test also referred to as 'iprev' Authentication
 %% Method in https://tools.ietf.org/html/rfc5451#section-3
 %%
@@ -170,6 +191,7 @@ ptr_lookup(IP) ->
 %%
 
 -spec forward_confirmed() -> true | false.
+
 forward_confirmed() ->
 	ServerDomain = sling_config:get_server_domain(),
 	sling_log:info("Configured server domain: ~p~n",[ServerDomain]),
@@ -184,8 +206,9 @@ forward_confirmed(ServerDomain) ->
 			{ok, Sorted} ->
 				[FirstRecord | _ ] = Sorted,
 				forward_confirmed(DomainStr, FirstRecord);
-			Error ->
-				Error
+			{error, Error} ->
+				sling_log:info("~p~n",[Error]),
+				false
 		end
 	end.
 
@@ -227,7 +250,11 @@ forward_confirmed(ServerDomain, DnsEntry) ->
 	end.	
 		
 
-match_domain_ip_to_a_lookup(Domain,IP) ->
+%%
+%% @private Used by the @see forward_confirmed/2 for deep verification check.
+%%
+
+match_domain_ip_to_a_lookup(Domain, IP) ->
 	case inet_res:lookup(Domain, in, a, [{recurse, true}]) of
 		[] -> 
 			{ error, <<"Empty A answer">> };
@@ -254,6 +281,10 @@ match_domain_ip_to_a_lookup(Domain,IP) ->
 
 %% ----------------------------------------------------------------------------
 
+%%
+%% @doc
+%%
+
 spf_exists() ->
 	ServerDomain = sling_config:get_server_domain(),
 	spf_exists(ServerDomain).
@@ -271,6 +302,10 @@ spf_exists(Domain) ->
 		
 %% ----------------------------------------------------------------------------
 
+%%
+%% @doc
+%%
+
 dkim_configured() ->
 	ServerDomain = sling_config:get_server_domain(),
 	Selector = sling_config:get_dkim_selector(),
@@ -282,14 +317,62 @@ dkim_configured(Domain, Selector) ->
 	sling_log:info("Running DKIM configuration test for ~p using ~p selector~n"
 		,[DomainStr, SelectorStr]),
 	case dkim_lookup(DomainStr, SelectorStr) of
-		{ok, DKIM} ->
-			DKIM;
+		{ok, [Dkim]} ->
+			DkimConfig = split_dkim(Dkim),
+			K = proplists:get_value("k", DkimConfig),
+			P = proplists:get_value("p", DkimConfig),
+			sling_log:info("DNS records configured with ~p key: ~p~n",[K, P]),
+			case reconcile_public_key(K, P) of
+				{ok, Result} ->
+					case Result of
+						true -> 
+							sling_log:info("DKIM test successful ~n",[]);
+						false ->
+							sling_log:info("DKIM test failed ~n",[])
+					end,	
+					Result;
+				{error, Reason} ->
+					sling_log:info("DKIM test failed ~p~n",[Reason]),
+					false
+			end;
+		{ok, MultiValue} ->
+			{error, {multivalue, MultiValue}};
 		Error ->
 			Error
 	end.
 
+%%
+%% @private
+%%
 
-		
+split_dkim(Dkim) ->
+	DkimStr = sling_utils:ensure_string(Dkim),
+	Tokens = re:split(DkimStr, " ", [{ return, list }]),
+	lists:foldl(fun(Token, Acc) -> 
+		case re:split(Token, "=", [{ return, list }]) of
+			[Key, Val] ->
+				Val1 = string:strip(Val, right, $;),
+				Acc ++ [{Key, Val1}];
+			_ -> 
+				Acc
+		end
+	end, [], Tokens).
+
+
+%%
+%% @private 
+%%
+
+reconcile_public_key(Type, PublicKey) when Type =:= "rsa" ->
+	sling_log:info("Reconciling public key DNS entry against local private key..~n",[]),
+	PubKeyBin = sling_utils:ensure_binary(PublicKey),
+	Pub = sling_crypto:key_to_entry(base64, PubKeyBin),
+	Msg = <<"asdf">>,
+	Sig = sling_crypto:sign_dkim(Msg),
+	Verified = sling_crypto:verify_dkim(Msg, Sig, Pub),
+	{ok, Verified};
+reconcile_public_key(Type, _PublicKey) ->
+	{error, {unmatched, Type }}.
 
 
 

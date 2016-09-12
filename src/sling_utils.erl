@@ -17,6 +17,9 @@
 	,ensure_ip_tuple/1
 ]).
 
+%%
+%% @doc
+%%
 ensure_string(Val) when is_binary(Val) ->
 	binary_to_list(Val);
 ensure_string(Val) when is_atom(Val) ->
@@ -24,16 +27,25 @@ ensure_string(Val) when is_atom(Val) ->
 ensure_string(Val) when is_list(Val) ->
 	Val.
 
+%%
+%% @doc
+%%
 ensure_binary(Val) when is_list(Val) ->
 	list_to_binary(Val);
 ensure_binary(Val) when is_binary(Val) ->
 	Val.
 
+%%
+%% @doc
+%%
 ensure_ip_string(IP) when is_tuple(IP) ->
 	inet_parse:ntoa(IP);	
 ensure_ip_string(IP) when is_list(IP) ->
 	IP.
 
+%%
+%% @doc
+%%
 ensure_ip_tuple(IP) when is_tuple(IP) ->
 	IP;	
 ensure_ip_tuple(IP) when is_list(IP) ->
