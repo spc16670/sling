@@ -1,3 +1,20 @@
+
+
+gen_smtp is known to work with Outlook with the following in socket.erl:
+
+	to_ssl_client(Socket, Options, Timeout) when is_port(Socket) ->
+	    SSLOpts = [
+	        {reuse_sessions,true},
+	        {versions,['tlsv1.2']},
+	        {secure_renegotiate,true},
+	        {honor_cipher_order,true}
+	    ],
+	    Result = ssl:connect(Socket, SSLOpts, Timeout),
+
+From address must be specified and resolve to real address, Outlook will
+categorize message as SPAN otherwise.
+
+
 List of DNS entries that are relevant to email delivery:
 
 PTR:

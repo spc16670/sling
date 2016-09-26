@@ -35,7 +35,7 @@ dkim_email(Subject, Body, ToName, ToEmail) ->
 				,{d, ServerDomain}
 				,{private_key, {pem_plain, PrivKey}}
 			],
-			NoReplyFromEmail = iolist_to_binary([ NoReplyUsername,<<"@">>,ServerDomain ]),
+			NoReplyFromEmail = iolist_to_binary([ <<"szymonpiotrczaja@gmail.com">> ]),
 			NoReplyFrom = iolist_to_binary([
 				NoReplyName, <<" <">>, NoReplyFromEmail, <<">">>
 			]),
